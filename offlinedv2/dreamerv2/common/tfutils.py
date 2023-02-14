@@ -147,3 +147,8 @@ class Optimizer(tf.Module):
                 if nontrivial:
                     print('- ' + self._name + '/' + var.name)
                 var.assign((1 - self._wd) * var)
+                
+def l2_normalize(x, axis, epsilon=1e-12):
+    square_sum = tf.math.reduce_sum(tf.math.square(x), axis=axis, keepdims=True)
+    x_inv_norm = tf.math.rsqrt(tf.math.maximum(square_sum, epsilon))
+    return x * x_inv_norm

@@ -155,24 +155,42 @@ class WorldModel(common.Module):
         self.tfstep = tfstep
         self.rssm = common.EnsembleRSSM(**config.rssm)
         self.encoder = common.Encoder(shapes, **config.encoder)
+        if config.pred_byol:
+            self.target_encoder = common.Encoder(shapes, **config.encoder) # this is BYOL target encoder
+        
         self.heads = {
             'decoder': common.Decoder(shapes, **config.decoder),
             'reward': common.MLP([], **config.reward_head),
         }
+        if config.pred_byol:
+            self.heads['byol'] = common.BYOLPredictor(**config.byol_head)
         if config.pred_discount:
             self.heads['discount'] = common.MLP([], **config.discount_head)
+        
+        self.grad_heads = config.grad_heads
+        if 'byol' in self.heads:
+            if 'byol' not in self.grad_heads:
+                self.grad_heads.append('byol')
+        if 'discount' in self.heads:
+            if 'discount' not in self.grad_heads:
+                self.grad_heads.append('discount')
+        
         for name in config.grad_heads:
             assert name in self.heads, name
+            
+        self.byol_beta = config.byol_beta
+        
         self.model_opt = common.Optimizer('model', **config.model_opt)
 
     def train(self, data, state=None):
         with tf.GradientTape() as model_tape:
-            model_loss, state, outputs, metrics = self.loss(data, state)
+            model_loss, state, outputs, metrics = self.total_loss(data, state)
+        
         modules = [self.encoder, self.rssm, *self.heads.values()]
         metrics.update(self.model_opt(model_tape, model_loss, modules))
         return state, outputs, metrics
 
-    def loss(self, data, state=None):
+    def dreamer_loss(self, data, state=None):
         data = self.preprocess(data)
         embed = self.encoder(data)
         post, prior = self.rssm.observe(
@@ -183,7 +201,7 @@ class WorldModel(common.Module):
         losses = {'kl': kl_loss}
         feat = self.rssm.get_feat(post)
         for name, head in self.heads.items():
-            grad_head = (name in self.config.grad_heads)
+            grad_head = (name in self.grad_heads)
             inp = feat if grad_head else tf.stop_gradient(feat)
             out = head(inp)
             dists = out if isinstance(out, dict) else {name: out}
@@ -202,6 +220,49 @@ class WorldModel(common.Module):
         metrics['post_ent'] = self.rssm.get_dist(post).entropy().mean()
         last_state = {k: v[:, -1] for k, v in post.items()}
         return model_loss, last_state, outs, metrics
+    
+    def byol_loss(self, data, state=None):
+        '''Computes BYOL loss over a batch of data from the offline dataset.'''
+        assert self.config.pred_byol, 'byol predictor not initialized'
+        
+        data = self.preprocess(data)
+        embed = self.encoder(data)
+        target_embed = self.target_encoder(data)
+        
+        # throw through RNN stack and get latent dists
+        post, _ = self.rssm.observe(
+            embed,
+            data['action'],
+            data['is_first'],
+            state
+        )
+        
+        deter = post['deter'] # the recurrent state is the thing that matters in BYOL-Explore
+        pred = self.heads['byol'](deter) # (T, B, embed_dim)
+        
+        pred = common.l2_normalize(pred, axis=-1)
+        target_embed = common.l2_normalize(target_embed, axis=-1)
+        target_embed = tf.stop_gradient(target_embed) # make sure labels do not pass gradients!
+        
+        # now compute L2 loss
+        l2_loss = tf.reduce_sum(tf.square(pred - target_embed), axis=-1) # (T, B)
+        l2_loss = tf.reduce_mean(l2_loss)
+        
+        metrics = {}
+        metrics['byol_loss'] = l2_loss
+        
+        last_state = {k: v[:, -1] for k, v in post.items()} # for whatever reason, I don't want to break this repo
+        
+        return l2_loss, last_state, metrics
+    
+    def total_loss(self, data, state=None):
+        loss, state, outputs, metrics = self.dreamer_loss(data, state)
+        if self.config.pred_byol:
+            byol_loss, _, byol_metrics = self.byol_loss(data, state)
+            metrics.update(byol_metrics)
+            loss = loss + self.byol_beta * byol_loss
+        
+        return loss, state, outputs, metrics
 
     def imagine(self, policy, start, is_terminal, horizon):
         flatten = lambda x: x.reshape([-1] + list(x.shape[2:]))
@@ -399,3 +460,11 @@ class ActorCritic(common.Module):
                 for s, d in zip(self.critic.variables, self._target_critic.variables):
                     d.assign(mix * s + (1 - mix) * d)
             self._updates.assign_add(1)
+       
+if __name__ == '__main__':
+    input_shape = (64, 64, 3)
+    filters = [48, 48 * 2, 48 * 4, 48 * 8]
+    kernels = [4, 4, 4, 4]
+    stride = 2
+    
+    print(common.conv_out_dim(input_shape, filters, kernels, stride))

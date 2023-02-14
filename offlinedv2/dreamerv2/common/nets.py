@@ -311,7 +311,28 @@ class MLP(common.Module):
             x = self._act(x)
         x = x.reshape(features.shape[:-1] + [x.shape[-1]])
         return self.get('out', DistLayer, self._shape, **self._out)(x)
+    
+class BYOLPredictor(common.Module):
+    
+    def __init__(self, layers, out_dim, units, act='elu', norm='none'):
+        self._layers = layers
+        self._out_dim = out_dim
+        self._units = units
+        self._norm = norm
+        self._act = get_act(act)
 
+    def __call__(self, features):
+        x = tf.cast(features, prec.global_policy().compute_dtype)
+        x = x.reshape([-1, x.shape[-1]])
+        for index in range(self._layers):
+            x = self.get(f'dense{index}', tfkl.Dense, self._units)(x)
+            x = self.get(f'norm{index}', NormLayer, self._norm)(x)
+            x = self._act(x)
+        
+        x = self.get(f'final_dense', tfkl.Dense, self._out_dim)(x)
+        x = x.reshape(features.shape[:-1] + [x.shape[-1]])
+        # no distribution here, for BYOL loss
+        return x
 
 class GRUCell(tf.keras.layers.AbstractRNNCell):
 

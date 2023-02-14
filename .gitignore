@@ -132,3 +132,4 @@ dmypy.json
 # dhruv extensions
 offline_data/
 **condaenv**
+dreamerv2_logs/

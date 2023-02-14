@@ -155,7 +155,7 @@ def load_episodes(directory, capacity=None, minlen=1, keep_temporal_order=False)
     # temporally sorted order.
     filenames = sorted(directory.glob('*.npz'))
     if not keep_temporal_order:
-        print('Shuffling order of offline trajectories!')
+        print('Shuffling order of offline trajectories! \n')
         random.Random(0).shuffle(filenames)
     if capacity:
         num_steps = 0

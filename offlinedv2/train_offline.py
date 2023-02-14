@@ -63,7 +63,7 @@ def main():
     logdir.mkdir(parents=True, exist_ok=True)
     config.save(logdir / 'config.yaml')
     print(config, '\n')
-    print('Logdir', logdir)
+    print('Logdir:', logdir)
 
     import tensorflow as tf
     tf.config.experimental_run_functions_eagerly(not config.jit)
@@ -116,7 +116,7 @@ def main():
         logger.add(replay.stats, prefix=mode)
         logger.write()
 
-    print('Create envs.')
+    print('=== Create envs. === \n')
     num_eval_envs = min(config.envs, config.eval_eps)
     if config.envs_parallel == 'none':
         eval_envs = [make_env('eval', config, logdir) for _ in range(num_eval_envs)]
@@ -156,7 +156,7 @@ def main():
                 # Compute model validation loss as average over chunks of data
                 val_losses = []
                 for _ in range(10):
-                    val_loss, _, _, val_mets = agnt.wm.loss(next(val_dataset))
+                    val_loss, _, _, val_mets = agnt.wm.total_loss(next(val_dataset))
                     val_losses.append(val_loss)
                 model_logger.scalar(f'validation_model_loss', np.array(val_losses, np.float64).mean())
 

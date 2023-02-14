@@ -117,7 +117,6 @@ class Agent(common.Module):
             penalty = tf.math.reduce_mean(gm.stddev(), axis=[-1, -2])
         elif self.config.offline_penalty_type == 'byol_explore':
             assert self.config.pred_byol, 'byol was not initialized in agent'
-            # TODO add byol explore loss
             penalty = self.wm.byol_explore_penalty(seq)
         else:
             penalty = 0
@@ -171,13 +170,15 @@ class WorldModel(common.Module):
         if config.pred_discount:
             self.heads['discount'] = common.MLP([], **config.discount_head)
         
-        self.grad_heads = config.grad_heads
+        self.grad_heads = list(config.grad_heads)
         if 'byol' in self.heads:
             if 'byol' not in self.grad_heads:
                 self.grad_heads.append('byol')
         if 'discount' in self.heads:
             if 'discount' not in self.grad_heads:
                 self.grad_heads.append('discount')
+                
+        print(f'model grad heads: {self.grad_heads}')
         
         for name in config.grad_heads:
             assert name in self.heads, name

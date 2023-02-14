@@ -1,7 +1,7 @@
 defaults:
 
   # Train Script
-  logdir: /dev/null
+  logdir: ./dreamerv2_logs/meandis_odv2
   seed: 0
   task: dmc_walker_walk
   envs: 1
@@ -50,7 +50,7 @@ defaults:
   eval_state_mean: False
 
   # World Model
-  grad_heads: [decoder, reward, discount, byol]
+  grad_heads: [decoder, reward, discount]
   pred_byol: False
   pred_discount: True
   rssm: {ensemble: 7, hidden: 1024, deter: 1024, stoch: 32, discrete: 32, act: elu, norm: none, std_act: sigmoid2, min_std: 0.1}

@@ -115,6 +115,10 @@ class Agent(common.Module):
                     validate_args=True
                 ))
             penalty = tf.math.reduce_mean(gm.stddev(), axis=[-1, -2])
+        elif self.config.offline_penalty_type == 'byol_explore':
+            assert self.config.pred_byol, 'byol was not initialized in agent'
+            # TODO add byol explore loss
+            penalty = self.wm.byol_explore_penalty(seq)
         else:
             penalty = 0
 
@@ -263,6 +267,18 @@ class WorldModel(common.Module):
             loss = loss + self.byol_beta * byol_loss
         
         return loss, state, outputs, metrics
+    
+    def byol_explore_penalty(self, seq):
+        # TODO fix
+        assert 'deter' in seq
+        assert self.config.pred_byol
+        
+        pred = self.heads['byol'](seq['deter']) # (T, B)
+        target_embed = tf.stop_gradient(self.target_encoder(seq['rec_obs']))
+        l2_loss = tf.reduce_sum(tf.square(pred - target_embed), axis=-1) # (T, B)
+        return l2_loss
+    
+    # ======= evaluation methods =======
 
     def imagine(self, policy, start, is_terminal, horizon):
         flatten = lambda x: x.reshape([-1] + list(x.shape[2:]))
@@ -276,6 +292,7 @@ class WorldModel(common.Module):
             feat = self.rssm.get_feat(state)
             for key, value in {**state, 'action': action, 'feat': feat}.items():
                 seq[key].append(value)
+        
         seq = {k: tf.stack(v, 0) for k, v in seq.items()}
         if 'discount' in self.heads:
             disc = self.heads['discount'](seq['feat']).mean()
@@ -287,6 +304,14 @@ class WorldModel(common.Module):
                 disc = tf.concat([true_first[None], disc[1:]], 0)
         else:
             disc = self.config.discount * tf.ones(seq['feat'].shape[:-1])
+        
+        # get the decoder output in the case we want byol explore penalty
+        if 'byol' in self.heads:
+            rec_obs = self.heads['decoder'](seq['feat']).mean()
+            seq['rec_obs'] = rec_obs
+        else:
+            seq['rec_obs'] = None
+        
         seq['discount'] = disc
         # Shift discount factors because they imply whether the following state
         # will be valid, not whether the current state is valid.
